@@ -1,6 +1,6 @@
 'use client';
 
-import React, { use, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Check, Trash2, Edit3, X, Save, Calendar, User } from 'lucide-react';
 import Cookies from 'js-cookie';
 import axios from 'axios';
@@ -38,32 +38,7 @@ interface Stats {
 }
 
 const TodoApp: React.FC = () => {
-    const [todos, setTodos] = useState<Todo[]>([
-        {
-            id: 1,
-            title: "Complete project proposal",
-            description: "Finish the Q2 project proposal and send it to the team for review",
-            is_completed: false,
-            created_at: "2024-06-10T10:30:00Z",
-            user_id: 1
-        },
-        {
-            id: 2,
-            title: "Review code changes",
-            description: "Go through the pull requests and provide feedback",
-            is_completed: true,
-            created_at: "2024-06-09T14:20:00Z",
-            user_id: 1
-        },
-        {
-            id: 3,
-            title: "Update documentation",
-            description: null,
-            is_completed: false,
-            created_at: "2024-06-08T09:15:00Z",
-            user_id: 1
-        }
-    ]);
+    const [todos, setTodos] = useState<Todo[]>([]);
     const router = useRouter();
     const [newTodo, setNewTodo] = useState<NewTodo>({ title: '', description: '' });
     const [editingId, setEditingId] = useState<number | null>(null);
@@ -72,31 +47,75 @@ const TodoApp: React.FC = () => {
     const [showAddForm, setShowAddForm] = useState<boolean>(false);
     const [user, setUser] = useState<User | null>(null);
 
-    const addTodo = (): void => {
+    const addTodo = async (): Promise<void> => {
         if (!newTodo.title.trim()) return;
 
-        const todo: Todo = {
-            id: Date.now(),
+        const todo = {
             title: newTodo.title.trim(),
             description: newTodo.description.trim() || null,
             is_completed: false,
-            created_at: new Date().toISOString(),
-            user_id: 1
+            user_id: user?.id as number
         };
 
-        setTodos(prev => [todo, ...prev]);
+        const token = Cookies.get('token');
+        if (!token) {
+            console.log("Token not found, redirecting to login");
+            router.push('/');
+            return;
+        }
+        const response = await axios.post(`${API}/todo/create-todo`, todo, { headers: { Authorization: `Bearer ${token}` } })
+        console.log("New todo response:", response.data);
+        setTodos(prev => [{ id: response.data.id, created_at: response.data.created_at, ...todo }, ...prev]);
         setNewTodo({ title: '', description: '' });
         setShowAddForm(false);
     };
 
-    const toggleTodo = (id: number): void => {
+    const toggleTodo = async (id: number): Promise<void> => {
+        const todoArray = todos.filter((todo) => todo.id === id)
+        const todo = todoArray[0]
         setTodos(prev => prev.map(todo =>
             todo.id === id ? { ...todo, is_completed: !todo.is_completed } : todo
         ));
+        await editTodoByAPI(id, todo.title, todo.description as string, !todo.is_completed)
     };
 
-    const deleteTodo = (id: number): void => {
-        setTodos(prev => prev.filter(todo => todo.id !== id));
+    const editTodoByAPI = async (id: number, title: string, description: string, is_completed: boolean) => {
+        try {
+            const token = Cookies.get("token")
+            const response = await axios.put(`${API}/todo/update-todo/${id}`, {
+                is_completed,
+                description,
+                title
+            }, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            })
+            console.log(response.data, "Response")
+        } catch (error) {
+            console.log(error)
+        }
+    }
+
+    const deleteTodo = async (id: number): Promise<void> => {
+        try {
+            setTodos(prev => prev.filter(todo => todo.id !== id));
+            const token = Cookies.get('token');
+            if (!token) {
+                console.log("Token not found, redirecting to login");
+            }
+
+            console.log(typeof id)
+            const response = await axios.delete(`${API}/todo/delete-todo/${id}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            })
+            console.log(response.data)
+        } catch (error) {
+            console.log(error)
+        }
+
     };
 
     const startEditing = (todo: Todo): void => {
@@ -104,14 +123,20 @@ const TodoApp: React.FC = () => {
         setEditingTodo({ title: todo.title, description: todo.description || '' });
     };
 
-    const saveEdit = (): void => {
+    const saveEdit = async (): Promise<void> => {
         if (!editingTodo.title.trim()) return;
+
+        const todoArray = todos.filter((todo) => todo.id === editingId)
+        const todo = todoArray[0]
 
         setTodos(prev => prev.map(todo =>
             todo.id === editingId
                 ? { ...todo, title: editingTodo.title.trim(), description: editingTodo.description.trim() || null }
                 : todo
         ));
+
+        await editTodoByAPI(editingId as number, editingTodo.title.trim(), editingTodo.description.trim(), todo.is_completed)
+
         setEditingId(null);
         setEditingTodo({ title: '', description: '' });
     };
@@ -120,6 +145,7 @@ const TodoApp: React.FC = () => {
         setEditingId(null);
         setEditingTodo({ title: '', description: '' });
     };
+
 
     const formatDate = (dateString: string): string => {
         return new Date(dateString).toLocaleDateString('en-US', {
@@ -149,8 +175,28 @@ const TodoApp: React.FC = () => {
         }
 
         axios.get(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } }).then(response => {
-            console.log("User data:", response.data);
             setUser(response.data?.data)
+        }
+        ).catch(error => {
+            console.error("Error fetching user data:", error);
+            if (axios.isAxiosError(error) && error.response) {
+                console.error(`Error: ${error.response.data.message}`);
+            } else {
+                console.error("An unexpected error occurred.");
+            }
+        }
+        );
+    }, [])
+
+
+    useEffect(() => {
+        const token = Cookies.get('token');
+        if (!token) {
+            console.log("Token not found, redirecting to login");
+        }
+
+        axios.get(`${API}/todo`, { headers: { Authorization: `Bearer ${token}` } }).then(response => {
+            setTodos(response.data)
         }
         ).catch(error => {
             console.error("Error fetching user data:", error);
@@ -182,8 +228,6 @@ const TodoApp: React.FC = () => {
                         }}
                         className='text-red-400 cursor-pointer'>Log Out</div>
                 </div>
-
-
 
                 <div className="text-center mb-8">
                     <h1 className="text-4xl font-bold text-gray-800 mb-2">Todo App</h1>

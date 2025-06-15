@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.db import init_db
 from src.routes.users.auth import auth_router
+from src.routes.todos.todo import todo_router
 
 app = FastAPI()
 
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api/auth")
+app.include_router(todo_router, prefix="/api/todo")
 
 
 @app.get("/")
